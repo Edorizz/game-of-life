@@ -11,6 +11,7 @@
 
 /* Game variables */
 #define TIME_STEP	0.08
+#define TIME_STEP_DIFF	0.02
 
 /* Cell states */
 #define CELL_DEAD	0
@@ -19,8 +20,12 @@
 /* Grids */
 #define TMP_GRID	0
 #define REAL_GRID	1
-#define GRID_W		64
-#define GRID_H		64
+#define GRID_W		128
+#define GRID_H		128
+
+/* Colors */
+#define WHITE		0
+#define BLACK		1
 
 /* Window dimensions */
 #define WINDOW_W	768
@@ -34,19 +39,22 @@
 /* Macro fucntions */
 #define BIT(n)		(1 << (n))
 
-typedef struct _life {
+struct life {
 	/* [Grid] */
 	int *grid;
 	int *grid_tmp;
 	int grid_h, grid_w;
 
 	/* [Simulation flags] */
-	clock_t timer;
+	double time_step;
+	double timer;
 	uint8_t flags;
-} life;
+};
+
+const uint8_t colors[][3] = { { 0, 0, 0 }, { 58, 168, 220 } };
 
 int
-get_cell(life *conway, int y, int x, int grid)
+get_cell(struct life *conway, int y, int x, int grid)
 {
 	y += conway->grid_h;
 	x += conway->grid_w;
@@ -60,7 +68,7 @@ get_cell(life *conway, int y, int x, int grid)
 }
 
 void
-set_cell(life *conway, int y, int x, int state, int grid)
+set_cell(struct life *conway, int y, int x, int state, int grid)
 {
 	if (grid) {
 		conway->grid[(y % conway->grid_h) * conway->grid_w + (x % conway->grid_w)] = state;
@@ -71,7 +79,7 @@ set_cell(life *conway, int y, int x, int state, int grid)
 }
 
 int
-neighbour_cnt(life *conway, int y, int x)
+neighbour_cnt(struct life *conway, int y, int x)
 {
 	int i, j, n;
 
@@ -90,7 +98,7 @@ neighbour_cnt(life *conway, int y, int x)
 }
 
 int
-update_cell(life *conway, int y, int x)
+update_cell(struct life *conway, int y, int x)
 {
 	int nb;
 
@@ -104,7 +112,7 @@ update_cell(life *conway, int y, int x)
 }
 
 void
-time_tick(life *conway)
+time_tick(struct life *conway)
 {
 	int i, j;
 
@@ -118,7 +126,7 @@ time_tick(life *conway)
 }
 
 void
-empty_grid(life *conway)
+empty_grid(struct life *conway)
 {
 	int i;
 
@@ -128,7 +136,7 @@ empty_grid(life *conway)
 }
 
 void
-randomize_grid(life *conway)
+randomize_grid(struct life *conway)
 {
 	int i;
 
@@ -138,22 +146,23 @@ randomize_grid(life *conway)
 }
 
 void
-init_life(life *conway)
+init_life(struct life *conway)
 {
 	conway->grid = malloc(conway->grid_h * conway->grid_w * sizeof(int));
 	conway->grid_tmp = malloc(conway->grid_h * conway->grid_w * sizeof(int));
+	conway->flags |= BIT(DRAW);
+	conway->timer = glfwGetTime();
+	conway->time_step = TIME_STEP;
 
 	randomize_grid(conway);
-
-	conway->timer = clock();
 }
 
 void
 key_callback(GLFWwindow *win, int key, int scancode, int action, int mods)
 {
-	life *conway;
+	struct life *conway;
 
-	conway = (life *) glfwGetWindowUserPointer(win);
+	conway = (struct life *) glfwGetWindowUserPointer(win);
 
 	if (action == GLFW_PRESS) {
 		switch (key) {
@@ -174,6 +183,15 @@ key_callback(GLFWwindow *win, int key, int scancode, int action, int mods)
 			empty_grid(conway);
 			break;
 
+		case GLFW_KEY_UP:
+		case GLFW_KEY_K:
+			conway->time_step -= TIME_STEP_DIFF;
+			break;
+
+		case GLFW_KEY_DOWN:
+		case GLFW_KEY_J:
+			conway->time_step += TIME_STEP_DIFF;
+			break;
 		}
 	}
 }
@@ -181,7 +199,7 @@ key_callback(GLFWwindow *win, int key, int scancode, int action, int mods)
 int
 main(int argc, char **argv)
 {
-	life conway;
+	struct life conway;
 	struct dot_matrix dm;
 	uint8_t scr_buf[GRID_H][GRID_W][3];
 	double x, y;
@@ -201,13 +219,12 @@ main(int argc, char **argv)
 	glfwSetKeyCallback(dm.win, key_callback);
 	glfwSwapInterval(1);
 
-	/* Initialize game of life */
+	/* Initialize game of struct life */
 	memset(&conway, 0, sizeof(conway));
 	conway.grid_h = GRID_H;
 	conway.grid_w = GRID_W;
 	init_life(&conway);
 
-	conway.flags |= BIT(DRAW);
 	while (!glfwWindowShouldClose(dm.win) && !(conway.flags & BIT(QUIT))) {
 		glfwPollEvents();
 
@@ -232,9 +249,11 @@ main(int argc, char **argv)
 		}
 
 		/* Update if not paused */
-		if ((conway.flags & BIT(PAUSE))) {
+		if (!(conway.flags & BIT(PAUSE)) &&
+		    ((glfwGetTime() - conway.timer) >= conway.time_step)) {
 			time_tick(&conway);
 
+			conway.timer = glfwGetTime();
 			conway.flags |= BIT(DRAW);
 		}
 
@@ -242,7 +261,10 @@ main(int argc, char **argv)
 		if (conway.flags & BIT(DRAW)) {
 			for (i = 0; i != GRID_H; ++i) {
 				for (j = 0; j != GRID_W; ++j) {
+					/*
 					scr_buf[i][j][1] = 255 * conway.grid[i * GRID_W + j];
+					*/
+					memcpy(scr_buf[i][j], &colors[conway.grid[i * GRID_W + j]], sizeof (uint8_t) * 3);
 				}
 			}
 			
